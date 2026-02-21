@@ -176,20 +176,29 @@ export class AudioEngine {
         const arrayBuffer = await blob.arrayBuffer();
         const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
 
-        // Calculate fundamental pitches based on C2 drone (65.41Hz)
-        const baseFreq = 65.41;
-        const fifthFreq = baseFreq * 1.5; // Perfect 5th (G2 ~ 98.11Hz)
-        const octaveFreq = baseFreq * 2.0; // Octave up (C3 ~ 130.81Hz)
+        // Get subtle random variations (Combines 7 roots * 5 chords * 5 rates = 175 harmonic/rhythmic bases + infinite LFO/Filter drifts)
+        const variation = this.getRandomVariation();
+
+        // Dynamically update effect chain parameters for this new variation
+        if (this.filter && this.delay) {
+            // Smoothly shift to new values to avoid clicks if reusing context
+            this.filter.frequency.setTargetAtTime(variation.filterCutoff, this.audioContext.currentTime, 0.1);
+            this.delay.delayTime.setTargetAtTime(variation.delayTime, this.audioContext.currentTime, 0.1);
+        }
+
+        const baseFreq = variation.baseFreq;
+        const int1Freq = baseFreq * variation.intervals[0];
+        const int2Freq = baseFreq * variation.intervals[1];
 
         // --- Layer 1: Stretch & Pitch down audio with Panning ---
         const source1 = this.audioContext.createBufferSource();
         source1.buffer = audioBuffer;
-        source1.playbackRate.value = 0.5; // octave down
+        source1.playbackRate.value = variation.rates[0];
         source1.loop = true;
 
         const panner1 = this.audioContext.createStereoPanner();
         const panner1Lfo = this.audioContext.createOscillator();
-        panner1Lfo.frequency.value = 0.1; // slow pan
+        panner1Lfo.frequency.value = variation.panLfoSpeed1;
         panner1Lfo.connect(panner1.pan);
         panner1Lfo.start();
 
@@ -206,12 +215,12 @@ export class AudioEngine {
         // --- Layer 2: Ultra stretch audio with opposite panning ---
         const source2 = this.audioContext.createBufferSource();
         source2.buffer = audioBuffer;
-        source2.playbackRate.value = 0.25; // 2 octaves down
+        source2.playbackRate.value = variation.rates[1];
         source2.loop = true;
 
         const panner2 = this.audioContext.createStereoPanner();
         const panner2Lfo = this.audioContext.createOscillator();
-        panner2Lfo.frequency.value = 0.08;
+        panner2Lfo.frequency.value = variation.panLfoSpeed2;
         panner2Lfo.connect(panner2.pan);
         // Offset phase by starting later (or just letting it drift)
         panner2Lfo.start();
@@ -222,7 +231,7 @@ export class AudioEngine {
         // Volume LFO
         const volLfo = this.audioContext.createOscillator();
         volLfo.type = 'sine';
-        volLfo.frequency.value = 0.05; // 20 sec cycle
+        volLfo.frequency.value = variation.volLfoSpeed;
         volLfo.connect(gain2.gain);
         volLfo.start();
 
@@ -254,11 +263,14 @@ export class AudioEngine {
         };
 
         createDrone(baseFreq, 'triangle', 0.15);
-        createDrone(fifthFreq, 'sine', 0.1);
-        createDrone(octaveFreq, 'sine', 0.08);
+        createDrone(int1Freq, 'sine', 0.1);
+        createDrone(int2Freq, 'sine', 0.08);
 
         // --- Generative Layer: Random Sparkles (High frequencies) ---
-        const sparkleNotes = [baseFreq * 8, fifthFreq * 8, octaveFreq * 8, baseFreq * 16]; // High octaves
+        const sparkleNotes = [
+            baseFreq * 8, int1Freq * 8, int2Freq * 8,
+            baseFreq * 16, int1Freq * 16
+        ];
 
         const playSparkle = () => {
             if (!this.audioContext || this.activeSources.length === 0) return; // stopped
@@ -295,6 +307,50 @@ export class AudioEngine {
         // start first sparkle
         const timerId = window.setTimeout(playSparkle, 3000);
         this.generativeTimers.push(timerId);
+    }
+
+    private getRandomVariation() {
+        // Subtle base frequency changes: A1, B1, C2, D2, E2, F#2, G2
+        const roots = [55.00, 61.74, 65.41, 73.42, 82.41, 92.50, 98.00];
+        const baseFreq = roots[Math.floor(Math.random() * roots.length)];
+
+        // Subtle chord structures for the drone (based on fundamental ratios)
+        const chordPool = [
+            [1.5, 2.0],     // Perfect 5th + Octave
+            [1.25, 1.5],    // Major 3rd + Perfect 5th
+            [1.2, 1.5],     // Minor 3rd + Perfect 5th
+            [1.333, 2.0],   // Perfect 4th + Octave
+            [1.122, 1.5]    // Sus2 (Major 2nd + Perfect 5th)
+        ];
+        const intervals = chordPool[Math.floor(Math.random() * chordPool.length)];
+
+        // Variations in sound stretching
+        const ratesPool = [
+            [0.5, 0.25],    // Classic deep stretch
+            [0.4, 0.2],     // Extremely slow and deep
+            [0.6, 0.3],     // Slightly faster, lighter
+            [0.75, 0.375],  // Less pitched down, closer to original but dreamy
+            [0.5, 0.125]    // Layer 1 normal stretch, Layer 2 deep abyss
+        ];
+        const rates = ratesPool[Math.floor(Math.random() * ratesPool.length)];
+
+        // Infinite subtle drifts in effect parameters
+        const filterCutoff = 1000 + (Math.random() * 1000); // 1000 - 2000 Hz
+        const delayTime = 1.0 + (Math.random() * 1.5); // 1.0 - 2.5 seconds
+        const panLfoSpeed1 = 0.05 + (Math.random() * 0.1);
+        const panLfoSpeed2 = 0.03 + (Math.random() * 0.07);
+        const volLfoSpeed = 0.02 + (Math.random() * 0.06);
+
+        return {
+            baseFreq,
+            intervals,
+            rates,
+            filterCutoff,
+            delayTime,
+            panLfoSpeed1,
+            panLfoSpeed2,
+            volLfoSpeed
+        };
     }
 
     public stopPlaying() {
