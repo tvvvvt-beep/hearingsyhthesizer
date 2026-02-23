@@ -15,20 +15,30 @@ function App() {
   // Track 1
   const [track1State, setTrack1State] = useState<TrackState>('empty');
   const [track1Blob, setTrack1Blob] = useState<Blob | null>(null);
-  const [track1Vol, setTrack1Vol] = useState(0.8);
 
   // Track 2
   const [track2State, setTrack2State] = useState<TrackState>('empty');
   const [track2Blob, setTrack2Blob] = useState<Blob | null>(null);
-  const [track2Vol, setTrack2Vol] = useState(0.8);
 
-  const handleTrack1VolChange = (v: number) => {
-    setTrack1Vol(v);
-    audioEngine.setTrackVolume(1, v);
+  // Crossfader Mix Value (-1.0 to 1.0. 0 = Center)
+  const [mixValue, setMixValue] = useState(0);
+
+  // Helper to apply equal power crossfade panning
+  const applyCrossfade = (mix: number) => {
+    // Math.PI / 4 is 45 degrees, which gives equal power at center (0)
+    // Map -1..1 to 0..1 range first
+    const x = (mix + 1) / 2;
+    const t1Vol = Math.cos(x * Math.PI / 2);
+    const t2Vol = Math.sin(x * Math.PI / 2);
+
+    // Scale slightly down to leave headroom for heavy FX
+    audioEngine.setTrackVolume(1, t1Vol * 0.8);
+    audioEngine.setTrackVolume(2, t2Vol * 0.8);
   };
-  const handleTrack2VolChange = (v: number) => {
-    setTrack2Vol(v);
-    audioEngine.setTrackVolume(2, v);
+
+  const handleMixChange = (v: number) => {
+    setMixValue(v);
+    applyCrossfade(v);
   };
 
   const startRecordingTrack = async (track: 1 | 2) => {
@@ -80,8 +90,7 @@ function App() {
       setIsPlaying(true);
       await audioEngine.generateDualSoundscape(track1Blob, track2Blob);
       // Re-apply volumes after node generation
-      audioEngine.setTrackVolume(1, track1Vol);
-      audioEngine.setTrackVolume(2, track2Vol);
+      applyCrossfade(mixValue);
       setGlobalState('playing');
     } catch (e) {
       console.error(e);
@@ -149,10 +158,8 @@ function App() {
 
         {(track1Blob || track2Blob) && (
           <MixerBoard
-            track1Volume={track1Vol}
-            track2Volume={track2Vol}
-            onTrack1VolumeChange={handleTrack1VolChange}
-            onTrack2VolumeChange={handleTrack2VolChange}
+            mixValue={mixValue}
+            onMixChange={handleMixChange}
             disabled={globalState === 'processing'}
           />
         )}
