@@ -15,10 +15,12 @@ function App() {
   // Track 1
   const [track1State, setTrack1State] = useState<TrackState>('empty');
   const [track1Blob, setTrack1Blob] = useState<Blob | null>(null);
+  const [track1Variation, setTrack1Variation] = useState<number>(1);
 
   // Track 2
   const [track2State, setTrack2State] = useState<TrackState>('empty');
   const [track2Blob, setTrack2Blob] = useState<Blob | null>(null);
+  const [track2Variation, setTrack2Variation] = useState<number>(1);
 
   // Crossfader Mix Value (-1.0 to 1.0. 0 = Center)
   const [mixValue, setMixValue] = useState(0);
@@ -88,7 +90,7 @@ function App() {
     setGlobalState('processing');
     try {
       setIsPlaying(true);
-      await audioEngine.generateDualSoundscape(track1Blob, track2Blob);
+      await audioEngine.generateDualSoundscape(track1Blob, track2Blob, track1Variation, track2Variation);
       // Re-apply volumes after node generation
       applyCrossfade(mixValue);
       setGlobalState('playing');
@@ -139,6 +141,9 @@ function App() {
             trackLabel="Track 1"
             isRecording={track1State === 'recording'}
             isRecorded={track1State === 'recorded'}
+            variation={track1Variation}
+            onVariationChange={setTrack1Variation}
+            selectorPosition="right"
             onClick={() => track1State === 'recording' ? stopRecordingTrack(1) : startRecordingTrack(1)}
           />
 
@@ -148,6 +153,9 @@ function App() {
             trackLabel="Track 2"
             isRecording={track2State === 'recording'}
             isRecorded={track2State === 'recorded'}
+            variation={track2Variation}
+            onVariationChange={setTrack2Variation}
+            selectorPosition="left"
             onClick={() => track2State === 'recording' ? stopRecordingTrack(2) : startRecordingTrack(2)}
           />
         </div>

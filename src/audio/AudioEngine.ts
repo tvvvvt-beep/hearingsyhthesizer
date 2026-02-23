@@ -189,7 +189,7 @@ export class AudioEngine {
         }
     }
 
-    public async generateDualSoundscape(blob1: Blob | null, blob2: Blob | null) {
+    public async generateDualSoundscape(blob1: Blob | null, blob2: Blob | null, track1Var: number = 1, track2Var: number = 1) {
         this.init();
         if (!this.audioContext || !this.filter || !this.masterGain) throw new Error("Audio Context not initialized");
 
@@ -210,51 +210,93 @@ export class AudioEngine {
 
         if (!buffer1 && !buffer2) return; // Nothing to play
 
-        // Get subtle random variations
-        const variation = this.getRandomVariation();
+        // Retrieve specific parameter sets based on selected variations
+        const var1Params = this.getVariationParams(track1Var);
+        const var2Params = this.getVariationParams(track2Var);
 
-        // Dynamically update effect chain parameters for this new variation
+        // We use track 1's base frequency for shared synths and global effects to keep them in key,
+        // or a default if T1 is empty.
+        const masterParams = blob1 ? var1Params : var2Params;
+
+        // Dynamically update effect chain parameters for this new shared variation
         if (this.filter && this.delay) {
-            this.filter.frequency.setTargetAtTime(variation.filterCutoff, this.audioContext.currentTime, 0.1);
-            this.delay.delayTime.setTargetAtTime(variation.delayTime, this.audioContext.currentTime, 0.1);
+            this.filter.frequency.setTargetAtTime(masterParams.filterCutoff, this.audioContext.currentTime, 0.1);
+            this.delay.delayTime.setTargetAtTime(masterParams.delayTime, this.audioContext.currentTime, 0.1);
         }
 
-        const baseFreq = variation.baseFreq;
-        const int1Freq = baseFreq * variation.intervals[0];
-        const int2Freq = baseFreq * variation.intervals[1];
+        const baseFreq = masterParams.baseFreq;
+        const int1Freq = baseFreq * masterParams.intervals[0];
+        const int2Freq = baseFreq * masterParams.intervals[1];
 
         // Set up function to build a layer so we can apply it to multiple buffers
-        const buildLayer = (buffer: AudioBuffer, targetGain: GainNode | null, playbackRate: number, panSpeed: number, volSpeed: number, role: 'primary' | 'secondary') => {
+        const buildLayer = (
+            buffer: AudioBuffer,
+            targetGain: GainNode | null,
+            params: any,
+            role: 'primary' | 'secondary'
+        ) => {
             if (!this.audioContext || !targetGain) return;
 
             const source = this.audioContext.createBufferSource();
             source.buffer = buffer;
-            source.playbackRate.value = playbackRate;
+            source.playbackRate.value = role === 'primary' ? params.rates[0] : params.rates[1];
             source.loop = true;
 
             const panner = this.audioContext.createStereoPanner();
             const pannerLfo = this.audioContext.createOscillator();
-            pannerLfo.frequency.value = panSpeed;
+            pannerLfo.frequency.value = role === 'primary' ? params.panLfoSpeed1 : params.panLfoSpeed2;
             pannerLfo.connect(panner.pan);
             pannerLfo.start();
 
-            const roleGain = this.audioContext.createGain();
-            // Primary layer has static gain, Secondary drifts with LFO
-            if (role === 'primary') {
-                roleGain.gain.value = 0.5;
-            } else {
-                roleGain.gain.value = 0.4;
-                const volLfo = this.audioContext.createOscillator();
-                volLfo.type = 'sine';
-                volLfo.frequency.value = volSpeed;
-                volLfo.connect(roleGain.gain);
-                volLfo.start();
-                this.activeSources.push(volLfo);
+            // Setup Filter if variation asks for Highpass (e.g., Var 4)
+            let lastNodeBeforeGain: AudioNode = panner;
+
+            if (params.isHighpass) {
+                const lp = this.audioContext.createBiquadFilter();
+                lp.type = 'highpass';
+                lp.frequency.value = 800;
+                panner.connect(lp);
+                lastNodeBeforeGain = lp;
             }
 
-            source.connect(panner);
-            panner.connect(roleGain);
-            // Connect to that specific track's mixer gain node, instead of directly to filters
+            const roleGain = this.audioContext.createGain();
+
+            // Apply volume envelopes/LFOs based on variation percussiveness
+            if (params.isPercussive) {
+                // Rhythmic envelope
+                roleGain.gain.value = 0;
+                const volLfo = this.audioContext.createOscillator();
+                volLfo.type = 'square';
+                volLfo.frequency.value = params.volLfoSpeed * 20; // fast chop
+
+                // smoothing filter for the square wave
+                const smoothFilter = this.audioContext.createBiquadFilter();
+                smoothFilter.type = 'lowpass';
+                smoothFilter.frequency.value = 10;
+
+                volLfo.connect(smoothFilter);
+                smoothFilter.connect(roleGain.gain);
+                volLfo.start();
+                this.activeSources.push(volLfo);
+            } else {
+                // Ambient behavior
+                if (role === 'primary') {
+                    roleGain.gain.value = 0.5;
+                } else {
+                    roleGain.gain.value = 0.4;
+                    const volLfo = this.audioContext.createOscillator();
+                    volLfo.type = 'sine';
+                    volLfo.frequency.value = params.volLfoSpeed;
+                    volLfo.connect(roleGain.gain);
+                    volLfo.start();
+                    this.activeSources.push(volLfo);
+                }
+            }
+
+            source.connect(lastNodeBeforeGain);
+            lastNodeBeforeGain.connect(roleGain);
+
+            // Connect to that specific track's mixer gain node
             roleGain.connect(targetGain);
 
             source.start();
@@ -263,15 +305,14 @@ export class AudioEngine {
 
         // --- Build Track 1 Layers ---
         if (buffer1) {
-            buildLayer(buffer1, this.track1Gain, variation.rates[0], variation.panLfoSpeed1, variation.volLfoSpeed, 'primary');
-            buildLayer(buffer1, this.track1Gain, variation.rates[1], variation.panLfoSpeed2, variation.volLfoSpeed, 'secondary');
+            buildLayer(buffer1, this.track1Gain, var1Params, 'primary');
+            buildLayer(buffer1, this.track1Gain, var1Params, 'secondary');
         }
 
         // --- Build Track 2 Layers ---
         if (buffer2) {
-            // Slightly offset parameters for the second track by using inverted arrays or scaled randoms for a wider mix
-            buildLayer(buffer2, this.track2Gain, variation.rates[0] * 0.9, variation.panLfoSpeed2, variation.volLfoSpeed * 1.5, 'primary');
-            buildLayer(buffer2, this.track2Gain, variation.rates[1] * 1.1, variation.panLfoSpeed1, variation.volLfoSpeed * 0.8, 'secondary');
+            buildLayer(buffer2, this.track2Gain, var2Params, 'primary');
+            buildLayer(buffer2, this.track2Gain, var2Params, 'secondary');
         }
 
         // --- Synth Layer: Drone Pad (C2, G2, C3) ---
@@ -342,37 +383,54 @@ export class AudioEngine {
         this.generativeTimers.push(timerId);
     }
 
-    private getRandomVariation() {
-        // Subtle base frequency changes: A1, B1, C2, D2, E2, F#2, G2
+    private getVariationParams(mode: number) {
+        // Shared random base seeds
         const roots = [55.00, 61.74, 65.41, 73.42, 82.41, 92.50, 98.00];
         const baseFreq = roots[Math.floor(Math.random() * roots.length)];
-
-        // Subtle chord structures for the drone (based on fundamental ratios)
-        const chordPool = [
-            [1.5, 2.0],     // Perfect 5th + Octave
-            [1.25, 1.5],    // Major 3rd + Perfect 5th
-            [1.2, 1.5],     // Minor 3rd + Perfect 5th
-            [1.333, 2.0],   // Perfect 4th + Octave
-            [1.122, 1.5]    // Sus2 (Major 2nd + Perfect 5th)
-        ];
+        const chordPool = [[1.5, 2.0], [1.25, 1.5], [1.2, 1.5], [1.333, 2.0], [1.122, 1.5]];
         const intervals = chordPool[Math.floor(Math.random() * chordPool.length)];
 
-        // Variations in sound stretching
-        const ratesPool = [
-            [0.5, 0.25],    // Classic deep stretch
-            [0.4, 0.2],     // Extremely slow and deep
-            [0.6, 0.3],     // Slightly faster, lighter
-            [0.75, 0.375],  // Less pitched down, closer to original but dreamy
-            [0.5, 0.125]    // Layer 1 normal stretch, Layer 2 deep abyss
-        ];
-        const rates = ratesPool[Math.floor(Math.random() * ratesPool.length)];
+        let rates, filterCutoff, delayTime, panLfoSpeed1, panLfoSpeed2, volLfoSpeed;
+        let isPercussive = false;
+        let isHighpass = false;
 
-        // Infinite subtle drifts in effect parameters
-        const filterCutoff = 1000 + (Math.random() * 1000); // 1000 - 2000 Hz
-        const delayTime = 1.0 + (Math.random() * 1.5); // 1.0 - 2.5 seconds
-        const panLfoSpeed1 = 0.05 + (Math.random() * 0.1);
-        const panLfoSpeed2 = 0.03 + (Math.random() * 0.07);
-        const volLfoSpeed = 0.02 + (Math.random() * 0.06);
+        switch (mode) {
+            case 2: // Percussive & Rhythmic
+                rates = [0.8, 0.6];
+                filterCutoff = 2500;
+                delayTime = 0.5 + (Math.random() * 0.5); // shorter delays
+                panLfoSpeed1 = 0.5;
+                panLfoSpeed2 = 0.8;
+                volLfoSpeed = 0.3; // fast modulation chop
+                isPercussive = true;
+                break;
+            case 3: // Natural / Raw
+                rates = [1.0, 0.95]; // close to original
+                filterCutoff = 4000 + (Math.random() * 2000); // open filter
+                delayTime = 0.2 + (Math.random() * 0.3); // slapback or light reflection
+                panLfoSpeed1 = 0.01; // barely panning
+                panLfoSpeed2 = 0.02;
+                volLfoSpeed = 0.01;
+                break;
+            case 4: // High & Sparkle
+                rates = [1.5, 2.0]; // pitched up
+                filterCutoff = 800; // Not used as LP directly if we implement highpass
+                delayTime = 1.0 + (Math.random() * 1.0);
+                panLfoSpeed1 = 0.2;
+                panLfoSpeed2 = 0.3;
+                volLfoSpeed = 0.1;
+                isHighpass = true;
+                break;
+            case 1: // Ambient (Default)
+            default:
+                rates = [0.5, 0.25]; // deep stretch
+                filterCutoff = 1000 + (Math.random() * 1000); // muffled
+                delayTime = 1.5 + (Math.random() * 1.0); // long delays
+                panLfoSpeed1 = 0.05 + (Math.random() * 0.1);
+                panLfoSpeed2 = 0.03 + (Math.random() * 0.07);
+                volLfoSpeed = 0.02 + (Math.random() * 0.06);
+                break;
+        }
 
         return {
             baseFreq,
@@ -382,7 +440,9 @@ export class AudioEngine {
             delayTime,
             panLfoSpeed1,
             panLfoSpeed2,
-            volLfoSpeed
+            volLfoSpeed,
+            isPercussive,
+            isHighpass
         };
     }
 
