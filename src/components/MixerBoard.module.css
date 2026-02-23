@@ -1,0 +1,104 @@
+.container {
+    display: flex;
+    justify-content: center;
+    padding: 1.5rem 2rem;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.05);
+    margin: 2rem 0;
+    transition: opacity 0.3s ease;
+}
+
+.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.channels {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+}
+
+.channel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+}
+
+.divider {
+    width: 1px;
+    height: 100px;
+    background: linear-gradient(to bottom, transparent, rgba(255, 255, 255, 0.2), transparent);
+}
+
+.label {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    letter-spacing: 2px;
+}
+
+.icon {
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+}
+
+/* Custom Fader (Range Input) */
+.fader {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 120px;
+    height: 32px;
+    background: rgba(255, 255, 255, 0.1);
+    outline: none;
+    border-radius: 16px;
+    padding: 0 4px;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+    /* Rotate to make it vertical if desired, but keeping horizontal for space efficiency on mobile */
+}
+
+.fader::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, #ffffff, #e0e0e0);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 242, 254, 0.5);
+    transition: transform 0.1s ease, box-shadow 0.2s ease;
+}
+
+.fader::-moz-range-thumb {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: radial-gradient(circle at center, #ffffff, #e0e0e0);
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 242, 254, 0.5);
+    border: none;
+}
+
+@media (hover: hover) {
+    .fader::-webkit-slider-thumb:hover {
+        transform: scale(1.1);
+        box-shadow: 0 4px 12px rgba(0, 242, 254, 0.8);
+    }
+
+    .fader::-moz-range-thumb:hover {
+        transform: scale(1.1);
+        box-shadow: 0 4px 12px rgba(0, 242, 254, 0.8);
+    }
+}
+
+.fader:active::-webkit-slider-thumb {
+    transform: scale(0.9);
+}
+
+.fader:active::-moz-range-thumb {
+    transform: scale(0.9);
+}

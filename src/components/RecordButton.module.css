@@ -9,9 +9,18 @@
     min-height: 300px;
 }
 
+.trackLabel {
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    color: var(--text-secondary);
+    margin-bottom: 2rem;
+    text-transform: uppercase;
+}
+
 .button {
-    width: 150px;
-    height: 150px;
+    width: 120px;
+    height: 120px;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -20,6 +29,11 @@
     z-index: 10;
     transition: transform 0.2s ease, box-shadow 0.2s ease;
     background: radial-gradient(circle at center, rgba(79, 172, 254, 0.2), rgba(0, 242, 254, 0.05));
+}
+
+.recorded {
+    background: radial-gradient(circle at center, rgba(0, 242, 254, 0.4), rgba(79, 172, 254, 0.1));
+    box-shadow: 0 0 20px rgba(0, 242, 254, 0.2);
 }
 
 .button:hover {

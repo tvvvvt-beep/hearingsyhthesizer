@@ -18,9 +18,6 @@ export const SoundscapePlayer: React.FC<SoundscapePlayerProps> = ({
 }) => {
     return (
         <div className={styles.container}>
-            <h2 className={styles.title}>Your Atmosphere</h2>
-            <p className={styles.subtitle}>A unique soundscape sculpted from your environment.</p>
-
             <div className={`${styles.controls} glass`}>
                 <button
                     className={styles.controlBtn}

@@ -10,8 +10,11 @@ export class AudioEngine {
     private delayFeedback: GainNode | null = null;
     private filter: BiquadFilterNode | null = null;
 
-    // Active playing sources for stop() func
     private activeSources: (AudioBufferSourceNode | OscillatorNode | GainNode | StereoPannerNode)[] = [];
+
+    // Track Mixing Nodes
+    private track1Gain: GainNode | null = null;
+    private track2Gain: GainNode | null = null;
 
     // Generative Timers
     private generativeTimers: number[] = [];
@@ -34,6 +37,12 @@ export class AudioEngine {
 
         this.masterGain = this.audioContext.createGain();
         this.masterGain.gain.value = 1.0;
+
+        // Track Gains
+        this.track1Gain = this.audioContext.createGain();
+        this.track1Gain.gain.value = 0.8;
+        this.track2Gain = this.audioContext.createGain();
+        this.track2Gain.gain.value = 0.8;
 
         // Analyser setup
         this.analyser = this.audioContext.createAnalyser();
@@ -101,6 +110,10 @@ export class AudioEngine {
         dryGain.gain.value = 0.2; // Less dry signal in V2
         this.filter.connect(dryGain);
         dryGain.connect(this.masterGain);
+
+        // Connect Track Gains to the Filter (which feeds the FX bus and dry master)
+        this.track1Gain.connect(this.filter);
+        this.track2Gain.connect(this.filter);
     }
 
     private async createImpulseResponse(context: AudioContext, duration: number, decay: number): Promise<AudioBuffer> {
@@ -167,21 +180,41 @@ export class AudioEngine {
         });
     }
 
-    public async generateSoundscape(blob: Blob) {
+    public setTrackVolume(track: 1 | 2, value: number) {
+        // Value expects 0.0 to 1.0
+        if (track === 1 && this.track1Gain && this.audioContext) {
+            this.track1Gain.gain.setTargetAtTime(value, this.audioContext.currentTime, 0.05);
+        } else if (track === 2 && this.track2Gain && this.audioContext) {
+            this.track2Gain.gain.setTargetAtTime(value, this.audioContext.currentTime, 0.05);
+        }
+    }
+
+    public async generateDualSoundscape(blob1: Blob | null, blob2: Blob | null) {
         this.init();
         if (!this.audioContext || !this.filter || !this.masterGain) throw new Error("Audio Context not initialized");
 
         this.stopPlaying(); // ensure no overlapping playback
 
-        const arrayBuffer = await blob.arrayBuffer();
-        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+        // Decode provided blobs
+        let buffer1: AudioBuffer | null = null;
+        let buffer2: AudioBuffer | null = null;
 
-        // Get subtle random variations (Combines 7 roots * 5 chords * 5 rates = 175 harmonic/rhythmic bases + infinite LFO/Filter drifts)
+        if (blob1) {
+            const arr1 = await blob1.arrayBuffer();
+            buffer1 = await this.audioContext.decodeAudioData(arr1);
+        }
+        if (blob2) {
+            const arr2 = await blob2.arrayBuffer();
+            buffer2 = await this.audioContext.decodeAudioData(arr2);
+        }
+
+        if (!buffer1 && !buffer2) return; // Nothing to play
+
+        // Get subtle random variations
         const variation = this.getRandomVariation();
 
         // Dynamically update effect chain parameters for this new variation
         if (this.filter && this.delay) {
-            // Smoothly shift to new values to avoid clicks if reusing context
             this.filter.frequency.setTargetAtTime(variation.filterCutoff, this.audioContext.currentTime, 0.1);
             this.delay.delayTime.setTargetAtTime(variation.delayTime, this.audioContext.currentTime, 0.1);
         }
@@ -190,56 +223,56 @@ export class AudioEngine {
         const int1Freq = baseFreq * variation.intervals[0];
         const int2Freq = baseFreq * variation.intervals[1];
 
-        // --- Layer 1: Stretch & Pitch down audio with Panning ---
-        const source1 = this.audioContext.createBufferSource();
-        source1.buffer = audioBuffer;
-        source1.playbackRate.value = variation.rates[0];
-        source1.loop = true;
+        // Set up function to build a layer so we can apply it to multiple buffers
+        const buildLayer = (buffer: AudioBuffer, targetGain: GainNode | null, playbackRate: number, panSpeed: number, volSpeed: number, role: 'primary' | 'secondary') => {
+            if (!this.audioContext || !targetGain) return;
 
-        const panner1 = this.audioContext.createStereoPanner();
-        const panner1Lfo = this.audioContext.createOscillator();
-        panner1Lfo.frequency.value = variation.panLfoSpeed1;
-        panner1Lfo.connect(panner1.pan);
-        panner1Lfo.start();
+            const source = this.audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.playbackRate.value = playbackRate;
+            source.loop = true;
 
-        const gain1 = this.audioContext.createGain();
-        gain1.gain.value = 0.5;
+            const panner = this.audioContext.createStereoPanner();
+            const pannerLfo = this.audioContext.createOscillator();
+            pannerLfo.frequency.value = panSpeed;
+            pannerLfo.connect(panner.pan);
+            pannerLfo.start();
 
-        source1.connect(panner1);
-        panner1.connect(gain1);
-        gain1.connect(this.filter);
+            const roleGain = this.audioContext.createGain();
+            // Primary layer has static gain, Secondary drifts with LFO
+            if (role === 'primary') {
+                roleGain.gain.value = 0.5;
+            } else {
+                roleGain.gain.value = 0.4;
+                const volLfo = this.audioContext.createOscillator();
+                volLfo.type = 'sine';
+                volLfo.frequency.value = volSpeed;
+                volLfo.connect(roleGain.gain);
+                volLfo.start();
+                this.activeSources.push(volLfo);
+            }
 
-        source1.start();
-        this.activeSources.push(source1, panner1Lfo);
+            source.connect(panner);
+            panner.connect(roleGain);
+            // Connect to that specific track's mixer gain node, instead of directly to filters
+            roleGain.connect(targetGain);
 
-        // --- Layer 2: Ultra stretch audio with opposite panning ---
-        const source2 = this.audioContext.createBufferSource();
-        source2.buffer = audioBuffer;
-        source2.playbackRate.value = variation.rates[1];
-        source2.loop = true;
+            source.start();
+            this.activeSources.push(source, pannerLfo);
+        };
 
-        const panner2 = this.audioContext.createStereoPanner();
-        const panner2Lfo = this.audioContext.createOscillator();
-        panner2Lfo.frequency.value = variation.panLfoSpeed2;
-        panner2Lfo.connect(panner2.pan);
-        // Offset phase by starting later (or just letting it drift)
-        panner2Lfo.start();
+        // --- Build Track 1 Layers ---
+        if (buffer1) {
+            buildLayer(buffer1, this.track1Gain, variation.rates[0], variation.panLfoSpeed1, variation.volLfoSpeed, 'primary');
+            buildLayer(buffer1, this.track1Gain, variation.rates[1], variation.panLfoSpeed2, variation.volLfoSpeed, 'secondary');
+        }
 
-        const gain2 = this.audioContext.createGain();
-        gain2.gain.value = 0.4;
-
-        // Volume LFO
-        const volLfo = this.audioContext.createOscillator();
-        volLfo.type = 'sine';
-        volLfo.frequency.value = variation.volLfoSpeed;
-        volLfo.connect(gain2.gain);
-        volLfo.start();
-
-        source2.connect(panner2);
-        panner2.connect(gain2);
-        gain2.connect(this.filter);
-        source2.start();
-        this.activeSources.push(source2, panner2Lfo, volLfo);
+        // --- Build Track 2 Layers ---
+        if (buffer2) {
+            // Slightly offset parameters for the second track by using inverted arrays or scaled randoms for a wider mix
+            buildLayer(buffer2, this.track2Gain, variation.rates[0] * 0.9, variation.panLfoSpeed2, variation.volLfoSpeed * 1.5, 'primary');
+            buildLayer(buffer2, this.track2Gain, variation.rates[1] * 1.1, variation.panLfoSpeed1, variation.volLfoSpeed * 0.8, 'secondary');
+        }
 
         // --- Synth Layer: Drone Pad (C2, G2, C3) ---
         const createDrone = (freq: number, type: OscillatorType, maxGain: number) => {

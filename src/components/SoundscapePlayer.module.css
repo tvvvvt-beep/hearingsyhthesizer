@@ -10,22 +10,6 @@
     z-index: 10;
 }
 
-.title {
-    font-size: 2rem;
-    font-weight: 400;
-    margin-bottom: 0.5rem;
-    letter-spacing: 1px;
-}
-
-.subtitle {
-    font-size: 1rem;
-    font-weight: 300;
-    color: var(--text-secondary);
-    margin-bottom: 3rem;
-    text-align: center;
-    max-width: 80%;
-}
-
 .controls {
     display: flex;
     flex-direction: column;
