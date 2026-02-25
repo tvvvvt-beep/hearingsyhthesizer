@@ -10,6 +10,12 @@ export class AudioEngine {
     private delayFeedback: GainNode | null = null;
     private filter: BiquadFilterNode | null = null;
 
+    // Mastering nodes
+    private masterEq: BiquadFilterNode | null = null;
+    private masterCompressor: DynamicsCompressorNode | null = null;
+    private makeUpGain: GainNode | null = null;
+    private limiter: DynamicsCompressorNode | null = null;
+
     private activeSources: (AudioBufferSourceNode | OscillatorNode | GainNode | StereoPannerNode)[] = [];
 
     // Track Mixing Nodes
@@ -35,21 +41,53 @@ export class AudioEngine {
     private setupEffectChain() {
         if (!this.audioContext) return;
 
+        // Mastering Chain: Master Gain -> EQ -> Compressor -> Make-up Gain -> Limiter -> Analyser -> Destination
         this.masterGain = this.audioContext.createGain();
         this.masterGain.gain.value = 1.0;
+
+        // 1. Master EQ (High Shelf for Air)
+        this.masterEq = this.audioContext.createBiquadFilter();
+        this.masterEq.type = 'highshelf';
+        this.masterEq.frequency.value = 5000;
+        this.masterEq.gain.value = 3.0; // +3dB on high frequencies
+
+        // 2. Bus Compressor (Glue)
+        this.masterCompressor = this.audioContext.createDynamicsCompressor();
+        this.masterCompressor.threshold.value = -24; // catch lower peaks
+        this.masterCompressor.knee.value = 12; // soft knee
+        this.masterCompressor.ratio.value = 4; // moderate compression
+        this.masterCompressor.attack.value = 0.05; // 50ms (let transients punch through slightly)
+        this.masterCompressor.release.value = 0.25; // 250ms
+
+        // 3. Make-up Gain (音圧稼ぎ)
+        this.makeUpGain = this.audioContext.createGain();
+        this.makeUpGain.gain.value = 2.5; // boost volume by +8dB
+
+        // 4. Brickwall Limiter (Peak Protection)
+        this.limiter = this.audioContext.createDynamicsCompressor();
+        this.limiter.threshold.value = -0.5; // almost at 0dB max
+        this.limiter.knee.value = 0; // hard knee limiter
+        this.limiter.ratio.value = 20; // heavy squashing to prevent clipping
+        this.limiter.attack.value = 0.001; // 1ms instant catch
+        this.limiter.release.value = 0.1; // 100ms quick release
+
+        // Analyser setup
+        this.analyser = this.audioContext.createAnalyser();
+        this.analyser.fftSize = 256;
+
+        // Connect Mastering Chain
+        this.masterGain.connect(this.masterEq);
+        this.masterEq.connect(this.masterCompressor);
+        this.masterCompressor.connect(this.makeUpGain);
+        this.makeUpGain.connect(this.limiter);
+        this.limiter.connect(this.analyser);
+        this.analyser.connect(this.audioContext.destination);
 
         // Track Gains
         this.track1Gain = this.audioContext.createGain();
         this.track1Gain.gain.value = 0.8;
         this.track2Gain = this.audioContext.createGain();
         this.track2Gain.gain.value = 0.8;
-
-        // Analyser setup
-        this.analyser = this.audioContext.createAnalyser();
-        this.analyser.fftSize = 256;
-
-        this.masterGain.connect(this.analyser);
-        this.analyser.connect(this.audioContext.destination);
 
         // Reverb - Longer tail (8 seconds) for V2
         this.convolver = this.audioContext.createConvolver();
